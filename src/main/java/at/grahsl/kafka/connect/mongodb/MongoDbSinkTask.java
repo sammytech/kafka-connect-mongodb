@@ -41,10 +41,9 @@ import org.bson.BsonDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -105,46 +104,73 @@ public class MongoDbSinkTask extends SinkTask {
             logger.debug("no records to write for current poll operation");
             return;
         }
+        Map<String, String> collectionRename = sinkConfig.parseCollectionMappings();
+        HashMap<String, MongoCollection<BsonDocument>> collectionHashMap = new HashMap<>();
+        HashMap<String, Collection<SinkRecord>> collectionRecords = new HashMap<>();
 
-        MongoCollection<BsonDocument> mongoCollection = database.getCollection(
-                sinkConfig.getString(MongoDbSinkConnectorConfig.MONGODB_COLLECTION_CONF),
-                            BsonDocument.class);
-
-        List<? extends WriteModel<BsonDocument>> docsToWrite =
-                        sinkConfig.isUsingCdcHandler()
-                            ? buildWriteModelCDC(records)
-                                : buildWriteModel(records);
-
-        try {
-            logger.debug("#records to write: {}", docsToWrite.size());
-            if(!docsToWrite.isEmpty()) {
-                BulkWriteResult result = mongoCollection.bulkWrite(
-                        docsToWrite,BULK_WRITE_OPTIONS);
-                logger.debug("write result: "+result.toString());
+        records.parallelStream().forEach(sinkRecord -> {
+            String topic = sinkRecord.topic();
+            if(collectionRename.containsKey(topic)){
+                topic = collectionRename.get(topic);
             }
-        } catch(MongoException mexc) {
 
-            if(mexc instanceof BulkWriteException) {
-                BulkWriteException bwe = (BulkWriteException)mexc;
-                logger.error("mongodb bulk write (partially) failed", bwe);
-                logger.error(bwe.getWriteResult().toString());
-                logger.error(bwe.getWriteErrors().toString());
-                logger.error(bwe.getWriteConcernError().toString());
+            if(!collectionHashMap.containsKey(topic)){
+                MongoCollection<BsonDocument> mongoCollection = database.getCollection(topic, BsonDocument.class);
+                collectionHashMap.put(topic, mongoCollection);
+            }
+
+            if(collectionRecords.containsKey(sinkRecord.topic())){
+               collectionRecords.get(topic).add(sinkRecord);
             } else {
-                logger.error("error on mongodb operation" ,mexc);
-                logger.error("writing {} record(s) failed -> remaining retries ({})",
-                        records.size(),remainingRetries);
+                Collection<SinkRecord> sinkRecords = new HashSet<>();
+                sinkRecords.add(sinkRecord);
+                collectionRecords.put(topic, sinkRecords);
             }
+        });
 
-            if(remainingRetries-- <= 0) {
-                throw new ConnectException("couldn't successfully process records"
-                        + " despite retrying -> giving up :(",mexc);
+        //todo: Mapping of topics done here
+
+        collectionRecords.forEach((s, sinkRecords) -> {
+            MongoCollection<BsonDocument> mongoCollection = collectionHashMap.get(s);
+
+            List<? extends WriteModel<BsonDocument>> docsToWrite =
+                    sinkConfig.isUsingCdcHandler()
+                            ? buildWriteModelCDC(sinkRecords)
+                            : buildWriteModel(sinkRecords);
+
+            try {
+                logger.debug("#records to write: {}", docsToWrite.size());
+                if(!docsToWrite.isEmpty()) {
+                    BulkWriteResult result = mongoCollection.bulkWrite(
+                            docsToWrite,BULK_WRITE_OPTIONS);
+                    logger.debug("write result: "+result.toString());
+                }
+            } catch(MongoException mexc) {
+
+                if(mexc instanceof BulkWriteException) {
+                    BulkWriteException bwe = (BulkWriteException)mexc;
+                    logger.error("mongodb bulk write (partially) failed", bwe);
+                    logger.error(bwe.getWriteResult().toString());
+                    logger.error(bwe.getWriteErrors().toString());
+                    logger.error(bwe.getWriteConcernError().toString());
+                } else {
+                    logger.error("error on mongodb operation" ,mexc);
+                    logger.error("writing {} record(s) failed -> remaining retries ({})",
+                            sinkRecords.size(),remainingRetries);
+                }
+
+                if(remainingRetries-- <= 0) {
+                    throw new ConnectException("couldn't successfully process records"
+                            + " despite retrying -> giving up :(",mexc);
+                }
+
+                logger.debug("deferring retry operation for {}ms",deferRetryMs);
+                context.timeout(deferRetryMs);
+                throw new RetriableException(mexc.getMessage(),mexc);
             }
+        });
 
-            logger.debug("deferring retry operation for {}ms",deferRetryMs);
-            context.timeout(deferRetryMs);
-            throw new RetriableException(mexc.getMessage(),mexc);
-        }
+
 
     }
 

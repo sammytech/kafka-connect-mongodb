@@ -52,6 +52,7 @@ public class MongoDbSinkConnectorConfig extends AbstractConfig {
 
     public static final String MONGODB_CONNECTION_URI_DEFAULT = "mongodb://localhost:27017/kafkaconnect?w=1&journal=true";
     public static final String MONGODB_COLLECTION_DEFAULT = "kafkatopic";
+    public static final String MONGODB_COLLECTION_MAPPING_DEFAULT = "[]";
     public static final int MONGODB_MAX_NUM_RETRIES_DEFAULT = 3;
     public static final int MONGODB_RETRIES_DEFER_TIMEOUT_DEFAULT = 5000;
     public static final String MONGODB_VALUE_PROJECTION_TYPE_DEFAULT = "none";
@@ -72,6 +73,9 @@ public class MongoDbSinkConnectorConfig extends AbstractConfig {
 
     public static final String MONGODB_COLLECTION_CONF = "mongodb.collection";
     private static final String MONGODB_COLLECTION_DOC = "single sink collection name to write to";
+
+    public static final String MONGODB_COLLECTION_MAPPING_CONF = "mongodb.collection.renamer.mapping";
+    private static final String MONGODB_COLLECTION_MAPPING_DOC = "inline JSON array with objects describing sink collection name mapping to topics to write to";
 
     public static final String MONGODB_MAX_NUM_RETRIES_CONF = "mongodb.max.num.retries";
     private static final String MONGODB_MAX_NUM_RETRIES_DOC = "how often a retry should be done on write errors";
@@ -143,9 +147,12 @@ public class MongoDbSinkConnectorConfig extends AbstractConfig {
                 .define(MONGODB_CHANGE_DATA_CAPTURE_HANDLER, Type.STRING, MONGODB_CHANGE_DATA_CAPTURE_HANDLER_DEFAULT, Importance.LOW, MONGODB_CHANGE_DATA_CAPTURE_HANDLER_DOC)
                 .define(MONGODB_DELETE_ON_NULL_VALUES, Type.BOOLEAN, MONGODB_DELETE_ON_NULL_VALUES_DEFAULT, Importance.MEDIUM, MONGODB_DELETE_ON_NULL_VALUES_DOC)
                 .define(MONGODB_REPLACE_ONE_STRATEGY, Type.STRING, MONGODB_REPLACE_ONE_STRATEGY_DEFAULT, Importance.LOW, MONGODB_REPLACE_ONE_STRATEGY_DOC)
+                .define(MONGODB_COLLECTION_MAPPING_CONF, Type.STRING, MONGODB_COLLECTION_MAPPING_DEFAULT, Importance.LOW, MONGODB_COLLECTION_MAPPING_DOC)
+
                 ;
     }
 
+    //todo: make it with different authentication
     public MongoClientURI buildClientURI() {
         return new MongoClientURI(getString(MONGODB_CONNECTION_URI_CONF));
     }
@@ -182,9 +189,31 @@ public class MongoDbSinkConnectorConfig extends AbstractConfig {
         );
     }
 
+    public Map<String, String> parseCollectionMappings() {
+        try {
+            String settings = getString(MONGODB_COLLECTION_MAPPING_CONF);
+
+            if(settings.isEmpty()) {
+                return new HashMap<>();
+            }
+
+            List<FieldnameMapping> fm = objectMapper.readValue(
+                    settings, new TypeReference<List<FieldnameMapping>>() {});
+
+            Map<String, String> map = new HashMap<>();
+            for (FieldnameMapping e : fm) {
+                map.put(e.oldName, e.newName);
+            }
+            return map;
+        } catch (IOException e) {
+            throw new ConfigException("error: parsing rename fieldname mappings failed", e);
+        }
+    }
+
     public Map<String, String> parseRenameFieldnameMappings() {
         try {
             String settings = getString(MONGODB_FIELD_RENAMER_MAPPING);
+
             if(settings.isEmpty()) {
                 return new HashMap<>();
             }
