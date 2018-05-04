@@ -5,9 +5,11 @@ import com.mongodb.DBCollection;
 import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.WriteModel;
 import org.apache.kafka.connect.errors.DataException;
+import org.bson.BsonDateTime;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
 import org.bson.BsonString;
+import org.joda.time.LocalDateTime;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.platform.runner.JUnitPlatform;
@@ -27,7 +29,10 @@ public class MongoDbInsertTest {
             new BsonDocument(DBCollection.ID_FIELD_NAME,new BsonInt32(1004))
                     .append("first_name",new BsonString("Anne"))
                     .append("last_name",new BsonString("Kretchmar"))
-                    .append("email",new BsonString("annek@noanswer.org"));
+                    .append("email",new BsonString("annek@noanswer.org"))
+//                    .append("createdOn", new BsonDateTime(LocalDateTime.now().toDateTime().getMillis()))
+                    .append("createdBy", new BsonString(LocalDateTime.now().toDateTime().toString("YYYY-MM-dd HH:mm:ss")));
+
 
     @Test
     @DisplayName("when valid cdc event then correct ReplaceOneModel")

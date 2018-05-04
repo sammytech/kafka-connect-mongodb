@@ -23,7 +23,15 @@ import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.WriteModel;
 import org.apache.kafka.connect.errors.DataException;
+import org.bson.BsonDateTime;
 import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.BsonValue;
+import org.joda.time.LocalDate;
+import org.joda.time.LocalDateTime;
+import org.joda.time.format.DateTimeFormatter;
+
+import java.util.Date;
 
 public class MongoDbInsert implements CdcOperation {
 
@@ -42,7 +50,9 @@ public class MongoDbInsert implements CdcOperation {
         try {
             BsonDocument insertDoc = BsonDocument.parse(
                     valueDoc.get(JSON_DOC_FIELD_PATH).asString().getValue()
-            );
+            ).append("createdBy", new BsonString(LocalDateTime.now().toDateTime().toString("YYYY-MM-dd HH:mm:ss")));
+//                    .append("createdOn", new BsonDateTime(LocalDateTime.now().toDateTime().getMillis()))
+
             return new ReplaceOneModel<>(
                     new BsonDocument(DBCollection.ID_FIELD_NAME,
                             insertDoc.get(DBCollection.ID_FIELD_NAME)),
